@@ -193,6 +193,13 @@ function initSignaling(role, roomId) {
       logTerminal('Conectado al servidor de señalización de forma segura.', 'success');
       // Unirse a la sala con código e indicar rol
       ws.send(JSON.stringify({ type: 'join', roomId, role }));
+      
+      // Iniciar latido (heartbeat) cada 20 segundos para evitar que Render desconecte el WebSocket inactivo
+      ws.heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 20000);
     };
 
     ws.onmessage = (event) => {
@@ -211,6 +218,10 @@ function initSignaling(role, roomId) {
 
     ws.onclose = () => {
       logTerminal('Servidor de señalización desconectado.', 'info');
+      if (ws.heartbeatInterval) {
+        clearInterval(ws.heartbeatInterval);
+        ws.heartbeatInterval = null;
+      }
     };
   });
 }
@@ -265,6 +276,10 @@ function handleSignalingMessage(msg, resolve) {
       logTerminal(`Error del servidor: ${msg.message}`, 'error');
       alert(msg.message);
       resetApplication();
+      break;
+
+    case 'pong':
+      // Mensaje de latido (heartbeat) recibido del servidor. Ignorar.
       break;
   }
 }
@@ -828,6 +843,10 @@ function resetApplication() {
 
   // Cerrar sockets y conexiones
   if (ws) {
+    if (ws.heartbeatInterval) {
+      clearInterval(ws.heartbeatInterval);
+      ws.heartbeatInterval = null;
+    }
     ws.close();
     ws = null;
   }
