@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Vortex Share - Comparte archivos gigantes de más de 15 GB directamente de navegador a navegador usando WebRTC sin límites de velocidad ni tamaño.">
+  <title>Vortex Share - P2P Ultra-Large File Transfer</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Fondo animado con luces de neón -->
+  <div class="neon-bg-glow">
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+  </div>
+
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-symbol">🌀</div>
+        <h1>VORTEX <span class="accent-text">SHARE</span></h1>
+      </div>
+      <p class="subtitle">Transferencia de archivos gigante directa P2P y segura sin pasar por servidores</p>
+    </header>
+
+    <main class="app-main">
+      <!-- PANEL DE SELECCIÓN DE ROL: ENVIAR O RECIBIR -->
+      <section id="role-selection-panel" class="glass-panel">
+        <h2 class="section-title">¿Qué deseas hacer hoy?</h2>
+        <div class="role-grid">
+          <button id="btn-select-sender" class="role-card sender-card" aria-label="Enviar archivos grandes">
+            <div class="role-icon">🗲</div>
+            <h3>Enviar Archivo</h3>
+            <p>Selecciona un archivo grande (15 GB+) y genera un código de descarga seguro.</p>
+            <div class="hover-glow-border"></div>
+          </button>
+          
+          <button id="btn-select-receiver" class="role-card receiver-card" aria-label="Recibir archivos grandes">
+            <div class="role-icon">🖧</div>
+            <h3>Recibir Archivo</h3>
+            <p>Introduce el código compartido para descargar el archivo directamente a tu disco.</p>
+            <div class="hover-glow-border"></div>
+          </button>
+        </div>
+      </section>
+
+      <!-- PANEL DEL EMISOR (SENDER) -->
+      <section id="sender-panel" class="glass-panel hidden">
+        <button class="btn-back" id="btn-back-sender">← Volver al inicio</button>
+        <h2 class="section-title">Panel de Envío</h2>
+        
+        <div class="file-drop-zone" id="file-drop-zone">
+          <input type="file" id="file-input" class="file-input" />
+          <div class="drop-zone-content">
+            <div class="drop-icon">📂</div>
+            <p class="drop-text">Arrastra tu archivo aquí o haz clic para explorar</p>
+            <p class="drop-limits">Admite cualquier tamaño (15 GB, 50 GB, 100 GB+)</p>
+          </div>
+        </div>
+
+        <div id="selected-file-details" class="file-details-card hidden">
+          <div class="file-info-header">
+            <div class="file-info">
+              <span class="file-icon-large">📄</span>
+              <div class="file-meta">
+                <h4 id="detail-file-name" class="truncate-text">nombre_del_archivo.ext</h4>
+                <p id="detail-file-size">0.00 GB</p>
+              </div>
+            </div>
+            <button id="btn-remove-file" class="btn-remove-file" title="Quitar archivo" aria-label="Quitar archivo">
+              <span class="remove-icon">✕</span>
+            </button>
+          </div>
+          <button id="btn-generate-code" class="btn-primary">Generar Código de Enlace ⫸</button>
+        </div>
+
+        <div id="share-code-display" class="share-code-card hidden">
+          <p class="card-label">Comparte este código de seguridad con el receptor:</p>
+          <div class="code-box-container">
+            <div class="code-box" id="generated-code">000-000</div>
+            <button id="btn-copy-code" class="btn-secondary" title="Copiar código">Copiar</button>
+          </div>
+          <div class="connection-status-indicator">
+            <span class="pulse-dot active"></span>
+            <span id="sender-connection-status-text">Esperando que el receptor se conecte...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL DEL RECEPTOR (RECEIVER) -->
+      <section id="receiver-panel" class="glass-panel hidden">
+        <button class="btn-back" id="btn-back-receiver">← Volver al inicio</button>
+        <h2 class="section-title">Panel de Recepción</h2>
+        
+        <div class="receive-form">
+          <p class="instruction-text">Ingresa el código de 6 dígitos provisto por el emisor para establecer el canal seguro:</p>
+          
+          <div class="input-code-container">
+            <input type="text" id="input-share-code" placeholder="000-000" maxlength="7" autocomplete="off" />
+            <button id="btn-connect-receiver" class="btn-primary">Conectarse P2P ⚡</button>
+          </div>
+          
+          <div id="receiver-connection-status" class="connection-status-indicator hidden">
+            <span class="pulse-dot"></span>
+            <span id="receiver-connection-text">Iniciando protocolo de conexión...</span>
+          </div>
+        </div>
+
+        <!-- Confirmación de Archivo Entrante -->
+        <div id="incoming-file-card" class="file-details-card hidden">
+          <h3 class="incoming-label">🎁 Archivo Detectado</h3>
+          <div class="file-info">
+            <span class="file-icon-large">📦</span>
+            <div class="file-meta">
+              <h4 id="incoming-file-name" class="truncate-text">nombre_del_archivo.ext</h4>
+              <p id="incoming-file-size">0.00 GB</p>
+            </div>
+          </div>
+          
+          <div class="save-path-alert">
+            <p><strong>Nota técnica importante:</strong> Usaremos la <em>API de Acceso al Sistema de Archivos</em> para escribir los pedazos directamente en tu disco. Esto evita saturar la RAM y permite descargas de 15 GB+ con total estabilidad.</p>
+          </div>
+
+          <button id="btn-start-download" class="btn-success">Confirmar y Elegir Dónde Guardar</button>
+        </div>
+      </section>
+
+      <!-- PANEL DE TRANSFERENCIA ACTIVA (AMBOS ROLES) -->
+      <section id="transfer-panel" class="glass-panel hidden">
+        <h2 class="section-title" id="transfer-title">Transferencia P2P en Curso</h2>
+
+        <!-- Visualización de Red Animada -->
+        <div class="network-vis">
+          <div class="node sender-node">
+            <div class="node-icon">💻</div>
+            <span class="node-label">Emisor</span>
+          </div>
+          
+          <div class="network-link">
+            <div class="network-stream-line"></div>
+            <div id="transfer-direction-arrow" class="data-particles-container"></div>
+          </div>
+
+          <div class="node receiver-node">
+            <div class="node-icon">📥</div>
+            <span class="node-label">Receptor</span>
+          </div>
+        </div>
+
+        <!-- Progreso y Estadísticas -->
+        <div class="progress-container">
+          <div class="progress-bar-wrapper">
+            <div class="progress-bar-glow"></div>
+            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+            <span id="progress-percentage-text" class="progress-text">0%</span>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-label">Velocidad</span>
+              <span class="stat-value" id="stat-speed">0.00 MB/s</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Transferido</span>
+              <span class="stat-value" id="stat-transferred">0 MB / 0 MB</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Tiempo Restante</span>
+              <span class="stat-value" id="stat-eta">Calculando...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas de Partículas Dinámicas según la velocidad -->
+        <div class="canvas-visualizer-container">
+          <canvas id="speed-particle-canvas"></canvas>
+          <div class="canvas-overlay">
+            <span class="overlay-title">Flujo Quántico de Datos</span>
+          </div>
+        </div>
+
+        <!-- Consola de Diagnóstico / Logs Retro -->
+        <div class="terminal-log-container">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <span class="terminal-title">Consola de Diagnóstico de Señal P2P</span>
+          </div>
+          <div class="terminal-body" id="terminal-logs">
+            <p class="log-line system">[SISTEMA] Listo para iniciar conexión segura...</p>
+          </div>
+        </div>
+
+        <!-- Controles de Cancelación / Finalización -->
+        <div class="transfer-controls">
+          <button id="btn-cancel-transfer" class="btn-danger">Cancelar Transferencia</button>
+          <button id="btn-finish-transfer" class="btn-success hidden">¡Completado con Éxito!</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <p>Desarrollado con ⚛ Vortex Share. Sin servidores intermediarios, 100% privado y seguro.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

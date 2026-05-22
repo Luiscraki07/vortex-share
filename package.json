@@ -1,0 +1,15 @@
+{
+  "name": "antigravity-p2p-share",
+  "version": "1.0.0",
+  "description": "Secure P2P Large File Sharing web application using WebRTC and FileSystem Access API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "ws": "^8.18.0"
+  },
+  "author": "Antigravity AI",
+  "license": "MIT"
+}
