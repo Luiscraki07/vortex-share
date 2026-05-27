@@ -298,12 +298,12 @@ btnGenerateCode.addEventListener('click', async () => {
   // Limpiar terminal logs para una nueva sesión
   terminalLogs.innerHTML = '<p class="log-line system">[SISTEMA] Listo para iniciar conexión segura...</p>';
   
-  // Generar código aleatorio tipo '482-109'
+  // Generar código aleatorio
   const codePart1 = Math.floor(100 + Math.random() * 900);
   const codePart2 = Math.floor(100 + Math.random() * 900);
-  currentRoomId = `${codePart1}-${codePart2}`;
+  currentRoomId = `${codePart1}${codePart2}`; // Guardar ID limpio de 6 dígitos para la sala
 
-  textGeneratedCode.innerText = currentRoomId;
+  textGeneratedCode.innerText = `${codePart1}-${codePart2}`; // Mostrar con guion para facilidad del usuario
   cardShareCode.classList.remove('hidden');
   btnGenerateCode.disabled = true;
 
@@ -329,14 +329,15 @@ btnConnectReceiver.addEventListener('click', async () => {
   // Limpiar terminal logs para una nueva sesión
   terminalLogs.innerHTML = '<p class="log-line system">[SISTEMA] Listo para iniciar conexión segura...</p>';
 
-  const code = inputShareCode.value.trim();
-  // Validar formato simple xxx-xxx
-  if (!code || code.length < 6) {
-    alert('Ingresa un código de enlace válido (ej. 123-456).');
+  // Sanitizar el código ingresado eliminando guiones, espacios y letras
+  const sanitizedCode = inputShareCode.value.replace(/[^0-9]/g, '').trim();
+  
+  if (!sanitizedCode || sanitizedCode.length < 6) {
+    alert('Ingresa un código de enlace válido de 6 dígitos (ej. 544-557 o 544557).');
     return;
   }
   
-  currentRoomId = code;
+  currentRoomId = sanitizedCode;
   btnConnectReceiver.disabled = true;
   indicatorReceiverStatus.classList.remove('hidden');
   textReceiverStatus.innerText = 'Conectando al canal seguro...';
