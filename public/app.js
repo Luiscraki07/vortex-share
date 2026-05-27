@@ -259,18 +259,32 @@ function handleSignalingMessage(msg, resolve) {
       const isAlreadyConnected = peerConnection && 
         (peerConnection.connectionState === 'connected' || peerConnection.connectionState === 'connecting' || (dataChannel && dataChannel.readyState === 'open'));
 
-      if (isAlreadyConnected) {
+      const isP2PDead = !peerConnection || 
+        peerConnection.connectionState === 'failed' || 
+        peerConnection.connectionState === 'closed';
+
+      if (!isP2PDead && isAlreadyConnected) {
         logTerminal('La conexión P2P directa ya existe o está en curso. Ignorando negociación de inicio redundante.', 'info');
         break;
       }
 
+      logTerminal('Re-negociando canal de datos seguro P2P...', 'system');
+      
+      // Limpiar conexión vieja antes de re-inicializar
+      if (dataChannel) {
+        try { dataChannel.close(); } catch(e){}
+        dataChannel = null;
+      }
+      if (peerConnection) {
+        try { peerConnection.close(); } catch(e){}
+        peerConnection = null;
+      }
+
       if (localRole === 'sender') {
-        textSenderStatus.innerText = 'Receptor conectado. Negociando canal seguro...';
-        // El emisor inicia el PeerConnection y el DataChannel
+        textSenderStatus.innerText = 'Receptor reconectado. Negociando canal seguro...';
         startPeerConnection();
       } else {
-        textReceiverStatus.innerText = 'Emisor conectado. Esperando detalles del archivo...';
-        // El receptor también debe inicializar el PeerConnection para poder recibir la oferta
+        textReceiverStatus.innerText = 'Emisor reconectado. Esperando detalles del archivo...';
         startPeerConnection();
       }
       break;
@@ -407,9 +421,18 @@ async function startPeerConnection() {
         initiateIceRestart();
       }
     } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
-      logTerminal('Fallo definitivo en la conexión WebRTC.', 'error');
+      logTerminal('Conexión WebRTC caída.', 'error');
       if (!isTransferActive) {
         cancelTransfer('Fallo de conexión de red persistente entre los dispositivos.');
+      } else {
+        logTerminal('Transferencia activa pausada. Esperando reconexión en caliente...', 'info');
+        // Detener temporalmente el cálculo de velocidad y mostrar pausa
+        if (speedCalculationInterval) {
+          clearInterval(speedCalculationInterval);
+          speedCalculationInterval = null;
+        }
+        textStatSpeed.innerText = '0.00 MB/s (Pausado)';
+        textStatEta.innerText = 'Reconectando...';
       }
     }
   };
@@ -490,7 +513,21 @@ function setupDataChannel() {
   dataChannel.binaryType = 'arraybuffer'; // Enviar datos en binario crudo
 
   dataChannel.onopen = () => {
-    logTerminal('¡Canal de datos P2P abierto y listo para transferir!', 'success');
+    logTerminal('¡Canal de datos P2P abierto!', 'success');
+    
+    // Si la transferencia ya está activa (es una reconexión en caliente)
+    if (isTransferActive) {
+      logTerminal('Restableciendo transferencia de datos interrumpida (Hot Reconnect)...', 'system');
+      if (localRole === 'receiver') {
+        // El receptor solicita reanudar enviando cuántos bytes ya tiene guardados
+        dataChannel.send(JSON.stringify({
+          type: 'resume-request',
+          receivedBytes: receivedBytes
+        }));
+        logTerminal(`Solicitando reanudación desde el byte: ${formatBytes(receivedBytes)}`, 'info');
+      }
+      return;
+    }
     
     if (localRole === 'sender') {
       // Enviar metadatos del archivo como primer mensaje
@@ -534,8 +571,7 @@ function setupDataChannel() {
   dataChannel.onclose = () => {
     logTerminal('Canal de datos P2P cerrado.', 'info');
     if (isTransferActive) {
-      alert('La transferencia se ha cancelado inesperadamente.');
-      resetApplication();
+      logTerminal('Canal P2P cerrado durante la transferencia. Esperando reconexión automática...', 'info');
     }
   };
 }
@@ -562,6 +598,11 @@ async function handleDataChannelMessage(msg) {
     case 'file-accepted':
       logTerminal('El receptor ha aceptado el archivo. Iniciando flujo de datos...', 'success');
       startFileTransfer();
+      break;
+
+    case 'resume-request':
+      logTerminal(`Solicitud de reanudación recibida. Reanudando transmisión desde: ${formatBytes(msg.receivedBytes)}`, 'success');
+      resumeFileTransfer(msg.receivedBytes);
       break;
 
     case 'transfer-cancelled':
@@ -715,8 +756,21 @@ async function finalizeDownload() {
 // ==========================================================================
 function startFileTransfer() {
   prepareTransferUI(selectedFile.name, selectedFile.size);
-  
-  let offset = 0;
+  resumeFileTransfer(0);
+}
+
+function resumeFileTransfer(startOffset) {
+  isTransferActive = true;
+  let offset = startOffset;
+  sentBytes = startOffset;
+
+  // Reactivar el cálculo de velocidad y ETA si estaba detenido
+  if (!speedCalculationInterval) {
+    lastBytesLogged = sentBytes;
+    lastTimeLogged = Date.now();
+    speedCalculationInterval = setInterval(calculateSpeedAndETA, 1000);
+  }
+
   const fileReader = new FileReader();
 
   // Configurar threshold bajo en el canal de datos
@@ -725,7 +779,7 @@ function startFileTransfer() {
   // Lógica de envío en bucle controlado
   const sendNextChunk = () => {
     // Si la transferencia ya no está activa, detenemos
-    if (!isTransferActive) return;
+    if (!isTransferActive || !dataChannel || dataChannel.readyState !== 'open') return;
 
     // Si dataChannel está bloqueado por demasiados datos acumulados (Backpressure)
     if (dataChannel.bufferedAmount > BUFFER_HIGH_WATERMARK) {
@@ -748,6 +802,7 @@ function startFileTransfer() {
     const buffer = e.target.result;
     
     try {
+      if (!dataChannel || dataChannel.readyState !== 'open') return;
       dataChannel.send(buffer);
       offset += buffer.byteLength;
       sentBytes = offset;
@@ -758,7 +813,10 @@ function startFileTransfer() {
       if (sentBytes === selectedFile.size) {
         // Envió todo
         isTransferActive = false;
-        clearInterval(speedCalculationInterval);
+        if (speedCalculationInterval) {
+          clearInterval(speedCalculationInterval);
+          speedCalculationInterval = null;
+        }
         logTerminal(`¡Envío completado de forma exitosa! total: ${formatBytes(selectedFile.size)}`, 'success');
         btnCancelTransfer.classList.add('hidden');
         btnFinishTransfer.classList.remove('hidden');
@@ -768,14 +826,12 @@ function startFileTransfer() {
         sendNextChunk();
       }
     } catch (err) {
-      logTerminal(`Error de transmisión en canal P2P: ${err.message}`, 'error');
-      cancelTransfer(`Fallo en el canal de transmisión P2P: ${err.message}`);
+      logTerminal(`Error de transmisión en canal P2P al reanudar: ${err.message}`, 'error');
     }
   };
 
   fileReader.onerror = (err) => {
-    logTerminal(`Error al leer archivo del disco local: ${err.message}`, 'error');
-    cancelTransfer(`Error de lectura local: ${err.message}`);
+    logTerminal(`Error al leer archivo del disco local al reanudar: ${err.message}`, 'error');
   };
 
   // Iniciar el bucle de envío
