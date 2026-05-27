@@ -222,10 +222,16 @@ function initSignaling(role, roomId) {
         clearInterval(ws.heartbeatInterval);
         ws.heartbeatInterval = null;
       }
-      // Si la conexión se cierra inesperadamente antes de la transferencia
-      if (ws && !isTransferActive) {
+      
+      const isP2PConnected = peerConnection && 
+        (peerConnection.connectionState === 'connected' || (dataChannel && dataChannel.readyState === 'open'));
+      
+      // Solo alertar y resetear si el WebSocket se cae ANTES de lograr la conexión directa P2P
+      if (ws && !isTransferActive && !isP2PConnected) {
         alert('Se ha perdido la conexión con el servidor de señalización de Render.');
         resetApplication();
+      } else {
+        logTerminal('Canal de señalización desconectado, pero el túnel P2P directo sigue activo y seguro.', 'success');
       }
     };
   });
@@ -271,11 +277,19 @@ function handleSignalingMessage(msg, resolve) {
       }
       break;
 
-    case 'peer-disconnected':
-      logTerminal('El otro dispositivo se desconectó.', 'error');
-      alert('La conexión con el otro dispositivo se ha perdido.');
-      resetApplication();
+    case 'peer-disconnected': {
+      const hasDirectP2P = peerConnection && 
+        (peerConnection.connectionState === 'connected' || (dataChannel && dataChannel.readyState === 'open'));
+      
+      if (!hasDirectP2P && !isTransferActive) {
+        logTerminal('El otro dispositivo se desconectó.', 'error');
+        alert('La conexión con el otro dispositivo se ha perdido.');
+        resetApplication();
+      } else {
+        logTerminal('El canal de señalización se cerró, pero el túnel P2P directo sigue enlazado.', 'info');
+      }
       break;
+    }
 
     case 'error':
       logTerminal(`Error del servidor: ${msg.message}`, 'error');
