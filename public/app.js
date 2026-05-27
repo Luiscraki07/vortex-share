@@ -25,6 +25,11 @@ let selectedFile = null;
 let currentRoomId = null;
 let iceCandidatesQueue = [];
 
+// Variables de reconexión y robustez
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+let isReconnecting = false;
+
 // Variables de estadísticas y transferencia
 let sentBytes = 0;
 let receivedBytes = 0;
@@ -226,12 +231,12 @@ function initSignaling(role, roomId) {
       const isP2PConnected = peerConnection && 
         (peerConnection.connectionState === 'connected' || (dataChannel && dataChannel.readyState === 'open'));
       
-      // Solo alertar y resetear si el WebSocket se cae ANTES de lograr la conexión directa P2P
-      if (ws && !isTransferActive && !isP2PConnected) {
+      // Si la desconexión fue inesperada (ws no es nulo y no fue por resetApplication)
+      if (ws) {
+        attemptWSReconnect();
+      } else if (!isP2PConnected && !isTransferActive) {
         alert('Se ha perdido la conexión con el servidor de señalización de Render.');
         resetApplication();
-      } else {
-        logTerminal('Canal de señalización desconectado, pero el túnel P2P directo sigue activo y seguro.', 'success');
       }
     };
   });
@@ -250,6 +255,15 @@ function handleSignalingMessage(msg, resolve) {
 
     case 'peer-connected':
       logTerminal(`¡Par conectado! El otro extremo es ${msg.role}.`, 'connection');
+      
+      const isAlreadyConnected = peerConnection && 
+        (peerConnection.connectionState === 'connected' || peerConnection.connectionState === 'connecting' || (dataChannel && dataChannel.readyState === 'open'));
+
+      if (isAlreadyConnected) {
+        logTerminal('La conexión P2P directa ya existe o está en curso. Ignorando negociación de inicio redundante.', 'info');
+        break;
+      }
+
       if (localRole === 'sender') {
         textSenderStatus.innerText = 'Receptor conectado. Negociando canal seguro...';
         // El emisor inicia el PeerConnection y el DataChannel
@@ -387,8 +401,16 @@ async function startPeerConnection() {
     logTerminal(`Estado de conexión WebRTC cambiado a: ${peerConnection.connectionState}`, 'connection');
     if (peerConnection.connectionState === 'connected') {
       logTerminal('Conexión P2P encriptada establecida directamente entre dispositivos.', 'success');
+    } else if (peerConnection.connectionState === 'disconnected') {
+      logTerminal('Conexión P2P interrumpida. Intentando recuperar el túnel de datos...', 'info');
+      if (localRole === 'sender') {
+        initiateIceRestart();
+      }
     } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
-      logTerminal('Fallo en la conexión WebRTC.', 'error');
+      logTerminal('Fallo definitivo en la conexión WebRTC.', 'error');
+      if (!isTransferActive) {
+        cancelTransfer('Fallo de conexión de red persistente entre los dispositivos.');
+      }
     }
   };
 
@@ -870,13 +892,16 @@ function resetApplication() {
   stopParticleVisualizer();
 
   // Cerrar sockets y conexiones
+  reconnectAttempts = 0;
+  isReconnecting = false;
   if (ws) {
     if (ws.heartbeatInterval) {
       clearInterval(ws.heartbeatInterval);
       ws.heartbeatInterval = null;
     }
-    ws.close();
-    ws = null;
+    const tempWs = ws;
+    ws = null; // Establecer a null antes de cerrar para evitar auto-reconexión
+    tempWs.close();
   }
   if (dataChannel) {
     dataChannel.close();
@@ -1078,3 +1103,60 @@ document.addEventListener('visibilitychange', async () => {
     await requestWakeLock();
   }
 });
+
+// ==========================================================================
+// 12. SISTEMA DE RECUPERACIÓN (AUTO-RECONNECT & ICE RESTART)
+// ==========================================================================
+function attemptWSReconnect() {
+  if (isReconnecting || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      logTerminal('Límite de intentos de reconexión de señalización alcanzado.', 'error');
+    }
+    return;
+  }
+  
+  isReconnecting = true;
+  reconnectAttempts++;
+  logTerminal(`Conexión con Render perdida. Re-conectando canal en 3 segundos (Intento ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, 'info');
+  
+  setTimeout(async () => {
+    try {
+      isReconnecting = false;
+      await initSignaling(localRole, currentRoomId);
+      reconnectAttempts = 0; // Reiniciar en éxito
+      logTerminal('¡Reconexión al canal de Render establecida con éxito!', 'success');
+      
+      // Si el P2P está desconectado y somos el emisor, forzar reinicio de ICE ahora que hay señalización
+      if (peerConnection && peerConnection.connectionState === 'disconnected' && localRole === 'sender') {
+        initiateIceRestart();
+      }
+    } catch (err) {
+      isReconnecting = false;
+      attemptWSReconnect();
+    }
+  }, 3000);
+}
+
+async function initiateIceRestart() {
+  if (!peerConnection || localRole !== 'sender') return;
+  
+  // Asegurarnos de que el WebSocket de señalización esté en línea antes de pedir reinicio
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    logTerminal('Esperando que el canal de señalización se restablezca para reiniciar ICE...', 'info');
+    return;
+  }
+  
+  logTerminal('Intentando re-establecer el enlace P2P directo (ICE Restart)...', 'system');
+  try {
+    const offer = await peerConnection.createOffer({ iceRestart: true });
+    await peerConnection.setLocalDescription(offer);
+    
+    ws.send(JSON.stringify({
+      type: 'signal',
+      signal: { sdp: peerConnection.localDescription }
+    }));
+    logTerminal('Oferta de recuperación de enlace P2P enviada.', 'info');
+  } catch (err) {
+    logTerminal(`Fallo al intentar reconexión P2P: ${err.message}`, 'error');
+  }
+}
