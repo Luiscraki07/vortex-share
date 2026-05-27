@@ -222,6 +222,11 @@ function initSignaling(role, roomId) {
         clearInterval(ws.heartbeatInterval);
         ws.heartbeatInterval = null;
       }
+      // Si la conexión se cierra inesperadamente antes de la transferencia
+      if (ws && !isTransferActive) {
+        alert('Se ha perdido la conexión con el servidor de señalización de Render.');
+        resetApplication();
+      }
     };
   });
 }
@@ -306,6 +311,7 @@ btnGenerateCode.addEventListener('click', async () => {
     await initSignaling('sender', currentRoomId);
   } catch (err) {
     logTerminal('Fallo al inicializar canal de señalización.', 'error');
+    alert('Error al conectar al servidor de señalización de Render: ' + (err.message || 'Error de red o servidor apagado.'));
     btnGenerateCode.disabled = false;
   }
 });
@@ -339,6 +345,7 @@ btnConnectReceiver.addEventListener('click', async () => {
     await initSignaling('receiver', currentRoomId);
   } catch (err) {
     logTerminal('Error al conectar. Verifica el código e inténtalo de nuevo.', 'error');
+    alert('Error al conectar al canal seguro de Render: ' + (err.message || 'Verifica el código e inténtalo de nuevo.'));
     btnConnectReceiver.disabled = false;
     indicatorReceiverStatus.classList.add('hidden');
   }
