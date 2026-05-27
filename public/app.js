@@ -778,6 +778,9 @@ function prepareTransferUI(name, size) {
   lastBytesLogged = 0;
   lastTimeLogged = Date.now();
 
+  // Solicitar Wake Lock para mantener el dispositivo despierto durante la transferencia
+  requestWakeLock();
+
   // Ocultar paneles anteriores
   panelSender.classList.add('hidden');
   panelReceiver.classList.add('hidden');
@@ -859,6 +862,9 @@ btnFinishTransfer.addEventListener('click', resetApplication);
 function resetApplication() {
   isTransferActive = false;
   clearInterval(speedCalculationInterval);
+  
+  // Liberar el Wake Lock para permitir que el dispositivo vuelva a su ahorro de energía normal
+  releaseWakeLock();
   
   // Limpiar timers y visualizadores
   stopParticleVisualizer();
@@ -1031,3 +1037,44 @@ function formatTime(seconds) {
     return `${secs}s`;
   }
 }
+
+// ==========================================================================
+// 11. PREVENCIÓN DE MODO SUEÑO (WAKE LOCK API)
+// ==========================================================================
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      logTerminal('Prevención de modo sueño activada (Wake Lock). El dispositivo permanecerá encendido.', 'system');
+      
+      wakeLock.addEventListener('release', () => {
+        logTerminal('Prevención de modo sueño liberada.', 'system');
+      });
+    } catch (err) {
+      logTerminal(`Aviso: No se pudo bloquear la suspensión de pantalla: ${err.message}`, 'info');
+    }
+  } else {
+    logTerminal('Aviso: Tu navegador o dispositivo no soporta Wake Lock para evitar suspensión de pantalla.', 'info');
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release()
+      .then(() => {
+        wakeLock = null;
+      })
+      .catch((err) => {
+        console.error('Error al liberar Wake Lock:', err);
+      });
+  }
+}
+
+// Re-solicitar el Wake Lock si el usuario cambia de pestaña y vuelve mientras hay una transferencia activa
+document.addEventListener('visibilitychange', async () => {
+  if (isTransferActive && document.visibilityState === 'visible') {
+    await requestWakeLock();
+  }
+});
